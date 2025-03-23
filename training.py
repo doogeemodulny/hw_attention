@@ -4,7 +4,6 @@ from rouge import Rouge
 from preprocessing import train_iter, test_iter
 from model import *
 
-
 """ Optimizer """
 
 
@@ -134,4 +133,4 @@ if __name__ == "main":
     optimizer = NoamOpt(model.d_model)
     model = fit(model, criterion, optimizer, train_iter, epochs_count=40, val_iter=test_iter)
 
-    torch.save(model.state_dict(), "trained_model_no_bert_emb_1.pt")
+    torch.save(model.state_dict(), "trained_model_bert_emb_50_01_256_1024.pt")

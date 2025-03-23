@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
+from slovnet.model.emb import NavecEmbedding
+from navec import Navec
 from preprocessing import DEVICE, word_field
 
 
@@ -125,13 +127,10 @@ class EncoderBlock(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, vocab_size, d_model, d_ff, blocks_count, heads_count, dropout_rate):
+    def __init__(self, vocab_size, d_model, d_ff, blocks_count, heads_count, dropout_rate, emb):
         super().__init__()
 
-        self._emb = nn.Sequential(
-            nn.Embedding(vocab_size, d_model),
-            PositionalEncoding(d_model, dropout_rate)
-        )
+        self._emb = emb
 
         block = lambda: EncoderBlock(
             size=d_model,
@@ -173,13 +172,11 @@ class DecoderLayer(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, vocab_size, d_model, d_ff, blocks_count, heads_count, dropout_rate):
+    def __init__(self, vocab_size, d_model, d_ff, blocks_count, heads_count, dropout_rate, emb):
         super().__init__()
 
-        self._emb = nn.Sequential(
-            nn.Embedding(vocab_size, d_model),
-            PositionalEncoding(d_model, dropout_rate)
-        )
+        self._emb = emb
+
 
         block = lambda: DecoderLayer(
             size=d_model,
@@ -231,10 +228,18 @@ class EncoderDecoder(nn.Module):
         super(EncoderDecoder, self).__init__()
 
         self.d_model = d_model
-        self.encoder = Encoder(source_vocab_size, d_model, d_ff, blocks_count, heads_count, dropout_rate)
-        self.decoder = Decoder(target_vocab_size, d_model, d_ff, blocks_count, heads_count, dropout_rate)
+        navec = Navec.load('navec_hudlit_v1_12B_500K_300d_100q.tar')
+        self._emb = nn.Sequential(
+                    NavecEmbedding(navec),
+                    nn.Linear(300, d_model),
+                    PositionalEncoding(d_model, dropout_rate)
+                )
+        self.encoder = Encoder(source_vocab_size, d_model, d_ff, blocks_count, heads_count, dropout_rate, self._emb)
+        self.decoder = Decoder(target_vocab_size, d_model, d_ff, blocks_count, heads_count, dropout_rate, self._emb)
 
         for p in self.parameters():
+            if p.type() != torch.float:
+                continue
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
@@ -260,3 +265,29 @@ class EncoderDecoder(nn.Module):
 
         summaries.append(target_input)
         return summaries
+
+    def forward(self, source_inputs, target_inputs, source_mask, target_mask):
+        encoder_output = self.encoder(source_inputs, source_mask)
+        return self.decoder(target_inputs, encoder_output, source_mask, target_mask)
+
+    def generate_summary(self, source_inputs, source_mask, max_length=100):
+        self.eval()
+        encoder_output = self.encoder(source_inputs, source_mask)
+
+        target_input = torch.ones((source_inputs.size(0), 1)).fill_(word_field.vocab.stoi['<sos>']).type_as(
+            source_inputs)
+        summaries = []
+
+        for _ in range(max_length):
+            target_mask = make_mask(target_input, target_input, pad_idx=word_field.vocab.stoi['<pad>'])[1]
+            logits = self.decoder(target_input, encoder_output, source_mask, target_mask)
+            next_word_prob = logits[:, -1]
+
+            next_word = next_word_prob.argmax(dim=-1, keepdim=True)
+            target_input = torch.cat((target_input, next_word), dim=1)
+
+        summaries.append(target_input)
+        return summaries
+
+
+

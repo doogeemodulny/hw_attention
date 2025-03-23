@@ -1,6 +1,7 @@
 """ Download and unpack an archive """
 # !wget -O news.zip -qq --no-check-certificate "https://drive.google.com/uc?export=download&id=1hIVVpBqM6VU4n3ERkKq4tFaH4sKN0Hab"
 # !unzip news.zip
+# !wget https://storage.yandexcloud.net/natasha-navec/packs/navec_hudlit_v1_12B_500K_300d_100q.tar
 
 import numpy as np
 from torchtext.data import Field, Example, Dataset, BucketIterator
@@ -36,11 +37,16 @@ for _, row in tqdm(data.iterrows(), total=len(data)):
     examples.append(Example.fromlist([source_text, target_text], fields))
 
 dataset = Dataset(examples, fields)
-train_dataset, test_dataset = dataset.split(split_ratio=0.85)
+train_dataset, val_dataset = dataset.split(split_ratio=0.85)
+train_dataset, test_dataset = train_dataset.split(split_ratio=0.9)
 print('Train size =', len(train_dataset))
 print('Test size =', len(test_dataset))
+print('Val size =', len(val_dataset))
 word_field.build_vocab(train_dataset, min_freq=7)
 print('Vocab size =', len(word_field.vocab))
+
+
+
 train_iter, test_iter = BucketIterator.splits(datasets=(train_dataset, test_dataset), batch_sizes=(16, 32),
                                               shuffle=True, device=DEVICE, sort=False)
 
